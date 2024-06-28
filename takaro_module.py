@@ -6,12 +6,12 @@ from string import ascii_lowercase, digits
 from secrets import choice
 import multiprocessing
 
-ModuleVersion = "1.0"
+ModuleVersion = "2.0"
 
 multiprocessing.freeze_support()
 
 def tkr_url(directory:str = ""):
-    return "https://takaro.h4ribote.net/" + directory
+    return "https://takaro.h4ribote.net" + directory
 
 
 class wallet:
@@ -37,10 +37,20 @@ class wallet:
 
         return {"address":address,"private_key":hex_private_key,"public_key":hex_public_key}
 
-    def balance(address:str) -> list:
-        response = requests.post(tkr_url("exploler/balance.php"), data={"address":address})
-        data = json.loads(response.text)
-        return data
+    def balance(address:str) -> dict:
+        wallet_balance = {}
+        try:
+            response = requests.post(tkr_url("/exploler/balance.php"), data={"address":address})
+            data = json.loads(response.text)
+            wallet_balance['aaaaaaaaaaaaaaaaaaaaaaaaa'] = 0
+            for blnc in data:
+                try:
+                    wallet_balance[blnc['currency_id']] = int(blnc['amount'])
+                except:
+                    pass
+        except:
+            pass
+        return wallet_balance
 
 
 class transaction:
@@ -66,7 +76,7 @@ class transaction:
             'node_signature':variable['node_signature']
         }
 
-        response = requests.post(tkr_url("post/transaction.php"), data=post_data)
+        response = requests.post(tkr_url("/post/transaction.php"), data=post_data)
 
         data = (response.text)
 
@@ -76,13 +86,9 @@ class transaction:
     
     def post2node(post_data:dict,node_url:str):
 
-        response = requests.post(node_url, data=post_data)
+        response = json.loads(requests.post(node_url, data=post_data).text)
 
-        data = (response.text)
-
-        data = json.loads(data)
-
-        return data
+        return response
 
     def create(wallet:dict,dest,amount:int,currency_id,fee_amount:int,comment,indent:int = 0):
         new_transaction = {
@@ -102,7 +108,15 @@ class transaction:
         new_transaction['public_key'] = wallet['public_key']
 
         return new_transaction
-
+    
+    def hash(transaction):
+        transaction_data = (f"{transaction['transaction_id']}{transaction['index_id']}{transaction['signature']}"
+                            f"{transaction['public_key']}{transaction['previous_hash']}"
+                            f"{transaction['source']}{transaction['dest']}{transaction['amount']}{transaction['currency_id']}"
+                            f"{transaction['fee_amount']}{transaction['comment']}{transaction['nonce']}{transaction['miner']}{transaction['miner_comment']}"
+                            f"{transaction['miner_public_key']}{transaction['miner_signature']}")
+        
+        return hashlib.sha256(transaction_data.encode()).hexdigest()
 
 class multi_mine:
     def mining(target_data:dict,previous_hash:str,miner_wallet:dict,comment:str="mined with qash_client made by h4ribote",difficulty:int=6,num_processes:int=4):
@@ -183,7 +197,7 @@ class node:
         while i < 20:
             try:
                 transaction_id_tmp = gen_transaction_id(indent)
-                response = requests.post(tkr_url("exploler/transaction.php"), data={"transaction_id":transaction_id_tmp})
+                response = requests.post(tkr_url("/exploler/transaction.php"), data={"transaction_id":transaction_id_tmp})
                 data = json.loads(response.text)
                 if not "error" in data:
                     return transaction_id_tmp
@@ -191,24 +205,39 @@ class node:
                 i += 1
         raise Exception('Please check the server status')
     
-    def verify_transaction(transaction:dict,node_wallet:dict):
-        # Custom verify code here...
-        verify = True
-        if verify:
-            signed_data = sign_data(node_wallet['private_key'],transaction['transaction_id'])
-            return signed_data
-        return False
+    def verify_transaction(transaction:dict):
+        try:
+            public_hash = hashlib.sha256(bytes.fromhex(transaction['public_key'])).hexdigest()
+            address = decimal_to_base62(int(public_hash,16))
+            if address != transaction['source']:
+                return False
+            public_hash = hashlib.sha256(bytes.fromhex(transaction['miner_public_key'])).hexdigest()
+            address = decimal_to_base62(int(public_hash,16))
+            if address != transaction['miner']:
+                return False
+            data = transaction['transaction_id']+transaction['source']+transaction['dest']+str(transaction['amount'])+\
+            transaction['currency_id']+str(transaction['fee_amount'])+transaction['comment']
+            data = hashlib.sha256(data.encode('utf-8')).hexdigest()
+            verify_source = verify_sign(data,transaction['signature'],transaction['public_key'])
+            data = transaction['transaction_id']+transaction['miner_comment']
+            data = hashlib.sha256(data.encode('utf-8')).hexdigest()
+            verify_miner = verify_sign(data,transaction['miner_signature'],transaction['miner_public_key'])
+            if verify_source and verify_miner:
+                return True
+            return False
+        except:
+            return False
 
     def post_transaction(transaction:dict,node_wallet:dict):
         try:
-            signed_data = node.verify_transaction(transaction,node_wallet)
-            if not signed_data:
+            if not node.verify_transaction(transaction):
                 return {"error":"invalid transaction"}
             else:
+                signed_data = sign_data(node_wallet['private_key'],transaction['transaction_id'])
                 transaction['node_address'] = node_wallet['address']
                 transaction['node_signature'] = signed_data
             
-            response = requests.post(tkr_url("post/transaction.php"), data=transaction)
+            response = requests.post(tkr_url("/post/transaction.php"), data=transaction)
             data = json.loads(response.text)
             return data
         except Exception as e:
@@ -216,25 +245,53 @@ class node:
     
     def get_previous_hash():
 
-        response = requests.post(tkr_url("exploler/transaction.php"))
+        response = requests.post(tkr_url("/exploler/transaction.php"))
         data = json.loads(response.text)
         if "error" in data:
             return False
         else:
             previous_transaction = data[0]
             previous_data = ""
-            for fdata in previous_transaction.values():
-                previous_data += str(fdata)
+            for fkeys in previous_transaction.keys():
+                if fkeys != "timestamp":
+                    previous_data += str(fkeys)
 
             previous_hash = hashlib.sha256(previous_data.encode('utf-8')).hexdigest()
 
             return previous_hash
     
     def previous_hash_from_admin() -> str:
-        response = requests.post(tkr_url("exploler/previous_hash.php"))
+        response = requests.post(tkr_url("/exploler/previous_hash.php"))
         data = json.loads(response.text)
         return str(data['hash'])
+ 
+
+class contract:
+    def sign(wallet:dict, contract_detail:str = False, contract_hash:str = False):
+        if contract_detail:
+            contract_hash = hashlib.sha256(contract_detail.encode('utf-8')).digest()
+        elif contract_hash:
+            contract_hash = bytes.fromhex(contract_hash)
+        else:
+            raise Exception()
+        
+        private_key = SigningKey.from_string(bytes.fromhex(wallet['private_key']),curve=SECP256k1)
+        contract_sign = private_key.sign(contract_hash).hex()
+
+        return contract_sign
     
+    
+def verify_sign(original_hex_data:str, sign_hex_data:str, public_key:str):
+    try:
+        public_key = VerifyingKey.from_string(bytes.fromhex(public_key),curve=SECP256k1)
+        sign_data = bytes.fromhex(sign_hex_data)
+        if public_key.verify(sign_data, bytes.fromhex(original_hex_data)):
+            return True
+        else:
+            return False
+    except:
+        return False
+            
 
 
 def sign_data(hex_private_key,data):
@@ -260,5 +317,3 @@ def gen_transaction_id(indent:int=0):
         raise ValueError
     chars = ascii_lowercase + digits
     return str(indent) + ''.join(choice(chars) for x in range(24))
-
-
