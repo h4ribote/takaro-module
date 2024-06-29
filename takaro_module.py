@@ -10,9 +10,7 @@ ModuleVersion = "2.0"
 
 multiprocessing.freeze_support()
 
-def tkr_url(directory:str = ""):
-    return "https://takaro.h4ribote.net" + directory
-
+NODE_URL:str = "https://takaro.h4ribote.net"
 
 class wallet:
 
@@ -40,7 +38,7 @@ class wallet:
     def balance(address:str) -> dict:
         wallet_balance = {}
         try:
-            response = requests.post(tkr_url("/exploler/balance.php"), data={"address":address})
+            response = requests.post(NODE_URL + "/exploler/balance.php", data={"address":address})
             data = json.loads(response.text)
             wallet_balance['aaaaaaaaaaaaaaaaaaaaaaaaa'] = 0
             for blnc in data:
@@ -76,7 +74,7 @@ class transaction:
             'node_signature':variable['node_signature']
         }
 
-        response = requests.post(tkr_url("/post/transaction.php"), data=post_data)
+        response = requests.post(NODE_URL + "/post/transaction.php", data=post_data)
 
         data = (response.text)
 
@@ -197,7 +195,7 @@ class node:
         while i < 20:
             try:
                 transaction_id_tmp = gen_transaction_id(indent)
-                response = requests.post(tkr_url("/exploler/transaction.php"), data={"transaction_id":transaction_id_tmp})
+                response = requests.post(NODE_URL + "/exploler/transaction.php", data={"transaction_id":transaction_id_tmp})
                 data = json.loads(response.text)
                 if not "error" in data:
                     return transaction_id_tmp
@@ -237,7 +235,7 @@ class node:
                 transaction['node_address'] = node_wallet['address']
                 transaction['node_signature'] = signed_data
             
-            response = requests.post(tkr_url("/post/transaction.php"), data=transaction)
+            response = requests.post(NODE_URL + "/post/transaction.php", data=transaction)
             data = json.loads(response.text)
             return data
         except Exception as e:
@@ -245,23 +243,22 @@ class node:
     
     def get_previous_hash():
 
-        response = requests.post(tkr_url("/exploler/transaction.php"))
+        response = requests.post(NODE_URL + "/exploler/transaction.php")
         data = json.loads(response.text)
         if "error" in data:
             return False
         else:
-            previous_transaction = data[0]
-            previous_data = ""
-            for fkeys in previous_transaction.keys():
-                if fkeys != "timestamp":
-                    previous_data += str(fkeys)
+            i = data[0] #previous_transaction
+            previous_data = (f"{i['transaction_id']}{i['index_id']}{i['signature']}{i['public_key']}{i['previous_hash']}"
+                             f"{i['source']}{i['dest']}{i['amount']}{i['currency_id']}{i['fee_amount']}{i['comment']}"
+                             f"{i['nonce']}{i['miner']}{i['miner_comment']}{i['miner_public_key']}{i['miner_signature']}")
 
             previous_hash = hashlib.sha256(previous_data.encode('utf-8')).hexdigest()
 
             return previous_hash
     
     def previous_hash_from_admin() -> str:
-        response = requests.post(tkr_url("/exploler/previous_hash.php"))
+        response = requests.post(NODE_URL + "/exploler/previous_hash.php")
         data = json.loads(response.text)
         return str(data['hash'])
  
